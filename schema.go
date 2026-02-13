@@ -7,6 +7,7 @@ import (
 
 	// Packages
 	attr "github.com/hashicorp/terraform-plugin-framework/attr"
+	diag "github.com/hashicorp/terraform-plugin-framework/diag"
 	tfschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	planmodifier "github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	stringplanmodifier "github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -32,7 +33,9 @@ type attrInfo struct {
 // resource schema. Dotted attribute names (e.g. "tls.cert") are grouped
 // into SingleNestedAttribute blocks. The fixed "name" and "id" attributes
 // are prepended.
-func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tfschema.Schema, []attrInfo) {
+func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tfschema.Schema, []attrInfo, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
 	// Build attrInfo list and detect naming collisions. Two kaiak
 	// attributes could map to the same terraform field when dots are
 	// converted to underscores (e.g. "tls.cert_key" and "tls.cert.key"
@@ -46,15 +49,24 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 	for _, a := range kaiakAttrs {
 		info := newAttrInfo(a)
 		if info.tfBlock == "" && reserved[info.tfField] {
-			panic(fmt.Sprintf("attribute %q conflicts with reserved terraform attribute %q", a.Name, info.tfField))
+			diags.AddError("Reserved attribute name",
+				fmt.Sprintf("Resource %q: attribute %q conflicts with reserved terraform attribute %q",
+					resourceName, a.Name, info.tfField))
+			continue
 		}
 		key := info.tfBlock + "/" + info.tfField
 		if prev, ok := seen[key]; ok {
-			panic(fmt.Sprintf("attribute naming collision: %q and %q both map to terraform field %q (block %q)",
-				prev, a.Name, info.tfField, info.tfBlock))
+			diags.AddError("Attribute naming collision",
+				fmt.Sprintf("Resource %q: attributes %q and %q both map to terraform field %q (block %q)",
+					resourceName, prev, a.Name, info.tfField, info.tfBlock))
+			continue
 		}
 		seen[key] = a.Name
 		infos = append(infos, info)
+	}
+
+	if diags.HasError() {
+		return tfschema.Schema{}, nil, diags
 	}
 
 	// Separate top-level attributes from block members
@@ -101,7 +113,7 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 	return tfschema.Schema{
 		Description: fmt.Sprintf("Manages a %s resource instance on a running Kaiak server.", resourceName),
 		Attributes:  tfAttrs,
-	}, infos
+	}, infos, diags
 }
 
 ///////////////////////////////////////////////////////////////////////////////

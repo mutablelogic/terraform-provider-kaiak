@@ -39,11 +39,7 @@ var _ resource.ResourceWithImportState = (*dynamicResource)(nil)
 // LIFECYCLE
 
 func newDynamicResource(meta schema.ResourceMeta) *dynamicResource {
-	infos := make([]attrInfo, 0, len(meta.Attributes))
-	for _, a := range meta.Attributes {
-		infos = append(infos, newAttrInfo(a))
-	}
-	return &dynamicResource{meta: meta, infos: infos}
+	return &dynamicResource{meta: meta}
 }
 
 // fullName returns the fully-qualified kaiak instance name.
@@ -59,7 +55,12 @@ func (r *dynamicResource) Metadata(_ context.Context, req resource.MetadataReque
 }
 
 func (r *dynamicResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	s, _ := buildResourceSchema(r.meta.Name, r.meta.Attributes)
+	s, infos, diags := buildResourceSchema(r.meta.Name, r.meta.Attributes)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	r.infos = infos
 	resp.Schema = s
 }
 
@@ -103,7 +104,9 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 	if resp.Diagnostics.HasError() {
 		if _, err := r.client.DestroyResourceInstance(ctx, fullName, false); err != nil {
 			resp.Diagnostics.AddWarning("Cleanup failed",
-				fmt.Sprintf("Failed to destroy %s after error: %s. The resource may need manual removal.", fullName, err))
+				fmt.Sprintf("Instance %s was created but attribute extraction failed. "+
+					"Attempted to destroy the instance but cleanup also failed: %s. "+
+					"The instance may need manual removal.", fullName, err))
 		}
 		return
 	}
@@ -116,7 +119,9 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 		if err != nil {
 			if _, cleanupErr := r.client.DestroyResourceInstance(ctx, fullName, false); cleanupErr != nil {
 				resp.Diagnostics.AddWarning("Cleanup failed",
-					fmt.Sprintf("Failed to destroy %s after error: %s. The resource may need manual removal.", fullName, cleanupErr))
+					fmt.Sprintf("Instance %s was created but applying attributes failed. "+
+						"Attempted to destroy the instance but cleanup also failed: %s. "+
+						"The instance may need manual removal.", fullName, cleanupErr))
 			}
 			resp.Diagnostics.AddError("Failed to apply attributes", err.Error())
 			return

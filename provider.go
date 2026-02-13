@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 
 	// Packages
@@ -11,6 +10,7 @@ import (
 	tfschema "github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	resource "github.com/hashicorp/terraform-plugin-framework/resource"
 	types "github.com/hashicorp/terraform-plugin-framework/types"
+	tflog "github.com/hashicorp/terraform-plugin-log/tflog"
 	client "github.com/mutablelogic/go-client"
 	httpclient "github.com/mutablelogic/go-server/pkg/provider/httpclient"
 	schema "github.com/mutablelogic/go-server/pkg/provider/schema"
@@ -128,7 +128,7 @@ func (p *kaiakProvider) Configure(ctx context.Context, req provider.ConfigureReq
 // returns a factory for each one. The server must be reachable via
 // KAIAK_ENDPOINT (or the default http://localhost:8084/api) at schema-
 // discovery time (i.e. during terraform plan / apply).
-func (p *kaiakProvider) Resources(_ context.Context) []func() resource.Resource {
+func (p *kaiakProvider) Resources(ctx context.Context) []func() resource.Resource {
 	endpoint := resolveEndpoint()
 
 	// Build client options with optional auth token
@@ -142,13 +142,19 @@ func (p *kaiakProvider) Resources(_ context.Context) []func() resource.Resource 
 
 	cl, err := httpclient.New(endpoint, opts...)
 	if err != nil {
-		log.Printf("[ERROR] Failed to create Kaiak client for %s: %s. No resources will be available.", endpoint, err)
+		tflog.Error(ctx, "Failed to create Kaiak client. No resources will be available.", map[string]interface{}{
+			"endpoint": endpoint,
+			"error":    err.Error(),
+		})
 		return nil
 	}
 
-	result, err := cl.ListResources(context.Background(), schema.ListResourcesRequest{})
+	result, err := cl.ListResources(ctx, schema.ListResourcesRequest{})
 	if err != nil {
-		log.Printf("[ERROR] Failed to discover resources from %s: %s. No resources will be available.", endpoint, err)
+		tflog.Error(ctx, "Failed to discover resources from Kaiak server. No resources will be available.", map[string]interface{}{
+			"endpoint": endpoint,
+			"error":    err.Error(),
+		})
 		return nil
 	}
 
