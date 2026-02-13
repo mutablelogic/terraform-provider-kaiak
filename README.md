@@ -26,7 +26,6 @@ itself. For more information on how to create custom resources, see the
 The easiest way to run a Kaiak server is with Docker:
 
 ```sh
-docker pull ghcr.io/mutablelogic/kaiak:latest
 docker run -p 8084:8084 ghcr.io/mutablelogic/kaiak:latest
 ```
 
