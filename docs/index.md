@@ -42,7 +42,6 @@ provider "kaiak" {
 }
 
 resource "kaiak_httpserver" "main" {
-  name   = "main"
   listen = ":8080"
 }
 ```

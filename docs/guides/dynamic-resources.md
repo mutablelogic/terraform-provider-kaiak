@@ -20,19 +20,16 @@ types, you can manage them as:
 
 ```hcl
 resource "kaiak_httpserver" "main" {
-  name   = "main"
   listen = ":8080"
 }
 
 resource "kaiak_httpstatic" "docs" {
-  name       = "docs"
   path       = "/docs"
   dir        = "/var/www/docs"
   httpserver = kaiak_httpserver.main.name
 }
 
 resource "kaiak_logger" "default" {
-  name = "default"
 }
 ```
 
@@ -40,8 +37,9 @@ resource "kaiak_logger" "default" {
 
 Every dynamic resource has two fixed attributes:
 
-* `name` - (Required) The instance label (e.g. `"main"`). Changing this forces
-  the resource to be destroyed and recreated.
+* `name` - (Optional) The instance label (e.g. `"main"`). If omitted, a unique
+  label is auto-generated. Changing this forces the resource to be destroyed
+  and recreated.
 * `id` - (Computed) The fully qualified instance name (`resource_type.label`),
   for example `"httpserver.main"`.
 
@@ -54,7 +52,6 @@ blocks in Terraform:
 
 ```hcl
 resource "kaiak_httpserver" "secure" {
-  name   = "secure"
   listen = ":8443"
 
   tls {
