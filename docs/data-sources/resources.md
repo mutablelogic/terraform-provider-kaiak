@@ -31,7 +31,8 @@ data "kaiak_resources" "servers" {
 ## Argument Reference
 
 * `type` - (Optional) Filter by resource type name (e.g. `"httpserver"`).
-  When omitted, all resource types are returned.
+  When omitted, all resource types are returned. Must be a known value at
+  plan time — computed values from other resources are not supported.
 
 ## Attribute Reference
 
