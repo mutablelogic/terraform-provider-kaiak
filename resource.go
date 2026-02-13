@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -45,6 +47,13 @@ func newDynamicResource(meta schema.ResourceMeta) *dynamicResource {
 // fullName returns the fully-qualified kaiak instance name.
 func (r *dynamicResource) fullName(label string) string {
 	return r.meta.Name + "." + label
+}
+
+// generateLabel returns a short random hex string for use as an instance label.
+func generateLabel() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return "tf" + hex.EncodeToString(b)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -96,19 +105,19 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	// Read the instance label
+	// Read the instance label, auto-generate if not provided
 	var name types.String
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &name)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if name.IsNull() || name.IsUnknown() {
-		resp.Diagnostics.AddError("Missing resource name",
-			"The \"name\" attribute must be a known, non-null value at apply time.")
-		return
+
+	label := name.ValueString()
+	if name.IsNull() || name.IsUnknown() || label == "" {
+		label = generateLabel()
 	}
 
-	fullName := r.fullName(name.ValueString())
+	fullName := r.fullName(label)
 
 	// Create the instance on the server
 	_, err := r.client.CreateResourceInstance(ctx, schema.CreateResourceInstanceRequest{
@@ -149,7 +158,7 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	// Read back the full state from the server
-	r.writeState(ctx, fullName, name.ValueString(), &resp.State, &resp.Diagnostics)
+	r.writeState(ctx, fullName, label, &resp.State, &resp.Diagnostics)
 }
 
 func (r *dynamicResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -169,7 +178,15 @@ func (r *dynamicResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	r.writeState(ctx, id.ValueString(), name.ValueString(), &resp.State, &resp.Diagnostics)
+	// Derive label from id when name is not in state (e.g. after import)
+	label := name.ValueString()
+	if name.IsNull() || name.IsUnknown() || label == "" {
+		if parts := strings.SplitN(id.ValueString(), ".", 2); len(parts) == 2 {
+			label = parts[1]
+		}
+	}
+
+	r.writeState(ctx, id.ValueString(), label, &resp.State, &resp.Diagnostics)
 }
 
 func (r *dynamicResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {

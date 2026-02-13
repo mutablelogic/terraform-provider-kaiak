@@ -74,10 +74,12 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 	// Separate top-level attributes from block members
 	tfAttrs := map[string]tfschema.Attribute{
 		"name": tfschema.StringAttribute{
-			Description: "Instance label (e.g. \"main\").",
-			Required:    true,
+			Description: "Instance label (e.g. \"main\"). Auto-generated if omitted.",
+			Optional:    true,
+			Computed:    true,
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.RequiresReplace(),
+				stringplanmodifier.UseStateForUnknown(),
 			},
 		},
 		"id": tfschema.StringAttribute{

@@ -23,7 +23,7 @@ see the [Kaiak repository](https://github.com/mutablelogic/go-server).
 The easiest way to run a Kaiak server is with Docker:
 
 ```sh
-docker run -p 8084:8084 ghcr.io/mutablelogic/kaiak:latest
+docker run -p 8084:8084 ghcr.io/mutablelogic/kaiak:latest run --http.addr=":8084"
 ```
 
 The base image includes a set of built-in resource types (HTTP server, static
