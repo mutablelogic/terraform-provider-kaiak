@@ -1,5 +1,7 @@
 # terraform-provider-kaiak
 
+[![Terraform Registry](https://img.shields.io/badge/terraform-registry-blueviolet)](https://registry.terraform.io/providers/mutablelogic/kaiak/latest)
+
 [Kaiak](https://github.com/mutablelogic/go-server) is a platform of composable
 software resources that can be assembled into custom server applications. This
 [Terraform](https://www.terraform.io/) provider lets you manage those resources
