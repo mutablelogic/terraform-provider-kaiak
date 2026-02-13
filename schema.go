@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	// Packages
@@ -32,10 +33,28 @@ type attrInfo struct {
 // into SingleNestedAttribute blocks. The fixed "name" and "id" attributes
 // are prepended.
 func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tfschema.Schema, []attrInfo) {
-	// Build attrInfo list
+	// Build attrInfo list and detect naming collisions. Two kaiak
+	// attributes could map to the same terraform field when dots are
+	// converted to underscores (e.g. "tls.cert_key" and "tls.cert.key"
+	// both become block "tls", field "cert_key").
 	var infos []attrInfo
+	seen := map[string]string{}  // "block/field" → original kaiak name
+	reserved := map[string]bool{ // top-level names reserved for internal use
+		"name": true,
+		"id":   true,
+	}
 	for _, a := range kaiakAttrs {
-		infos = append(infos, newAttrInfo(a))
+		info := newAttrInfo(a)
+		if info.tfBlock == "" && reserved[info.tfField] {
+			panic(fmt.Sprintf("attribute %q conflicts with reserved terraform attribute %q", a.Name, info.tfField))
+		}
+		key := info.tfBlock + "/" + info.tfField
+		if prev, ok := seen[key]; ok {
+			panic(fmt.Sprintf("attribute naming collision: %q and %q both map to terraform field %q (block %q)",
+				prev, a.Name, info.tfField, info.tfBlock))
+		}
+		seen[key] = a.Name
+		infos = append(infos, info)
 	}
 
 	// Separate top-level attributes from block members
@@ -48,7 +67,7 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 			},
 		},
 		"id": tfschema.StringAttribute{
-			Description: "Full qualified instance name (resource_type.label).",
+			Description: "Fully qualified instance name (resource_type.label).",
 			Computed:    true,
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
@@ -117,6 +136,12 @@ func kaiakValueToTF(v any, t string) attr.Value {
 		case int:
 			return types.Int64Value(int64(n))
 		}
+	}
+
+	// Value does not match its declared type — fall back to string but
+	// log the mismatch so server-side data issues are not silently hidden.
+	if t != "string" {
+		log.Printf("[WARN] kaiak attribute type mismatch: declared %q but got %T (%v); coercing to string", t, v, v)
 	}
 	return types.StringValue(fmt.Sprintf("%v", v))
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	// Packages
 	attr "github.com/hashicorp/terraform-plugin-framework/attr"
@@ -100,7 +101,10 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 	// Extract desired attributes from the plan and apply them
 	attrs := r.extractAttrs(ctx, req.Plan, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
-		_, _ = r.client.DestroyResourceInstance(ctx, fullName, false)
+		if _, err := r.client.DestroyResourceInstance(ctx, fullName, false); err != nil {
+			resp.Diagnostics.AddWarning("Cleanup failed",
+				fmt.Sprintf("Failed to destroy %s after error: %s. The resource may need manual removal.", fullName, err))
+		}
 		return
 	}
 
@@ -110,7 +114,10 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 			Apply:      true,
 		})
 		if err != nil {
-			_, _ = r.client.DestroyResourceInstance(ctx, fullName, false)
+			if _, cleanupErr := r.client.DestroyResourceInstance(ctx, fullName, false); cleanupErr != nil {
+				resp.Diagnostics.AddWarning("Cleanup failed",
+					fmt.Sprintf("Failed to destroy %s after error: %s. The resource may need manual removal.", fullName, cleanupErr))
+			}
 			resp.Diagnostics.AddError("Failed to apply attributes", err.Error())
 			return
 		}
@@ -183,8 +190,17 @@ func (r *dynamicResource) Delete(ctx context.Context, req resource.DeleteRequest
 }
 
 func (r *dynamicResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import by full qualified name (e.g. "httpstatic.docs")
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// Import by fully qualified name (e.g. "httpstatic.docs").
+	// Parse the ID into resource_type and label so that "name" is populated.
+	parts := strings.SplitN(req.ID, ".", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		resp.Diagnostics.AddError("Invalid import ID",
+			fmt.Sprintf("Expected format \"resource_type.label\" (e.g. \"httpstatic.docs\"), got %q", req.ID))
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), parts[1])...)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
