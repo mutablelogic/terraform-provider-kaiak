@@ -1,5 +1,10 @@
 ---
+layout: ""
 page_title: "Provider: Kaiak"
+description: |-
+  Use the Kaiak provider to manage resources on a running Kaiak server as infrastructure-as-code. Resource schemas are discovered dynamically, so any resource type registered with the server is automatically available in Terraform.
+
+  Kaiak is a platform of composable software resources that can be assembled into custom server applications. It is designed to be extensible — you can create your own resource types and register them with the server, making them immediately available through this provider.
 ---
 
 # Kaiak Provider
