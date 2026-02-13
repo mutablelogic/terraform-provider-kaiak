@@ -13,6 +13,22 @@ Kaiak is a platform of composable software resources that can be assembled into
 custom server applications. For more information on creating custom resource types,
 see the [Kaiak repository](https://github.com/mutablelogic/go-server).
 
+## Running the Kaiak Server
+
+The easiest way to run a Kaiak server is with Docker:
+
+```sh
+docker pull ghcr.io/mutablelogic/kaiak:latest
+docker run -p 8084:8084 ghcr.io/mutablelogic/kaiak:latest
+```
+
+The base image includes a set of built-in resource types (HTTP server, static
+file serving, logging, etc.), but the platform is designed to be extended with
+your own custom resource types. Multi-arch images (amd64, arm64) are available.
+
+For more information on configuring the server and creating custom resources,
+see the [Kaiak documentation](https://github.com/mutablelogic/go-server).
+
 ## Example Usage
 
 ```hcl
