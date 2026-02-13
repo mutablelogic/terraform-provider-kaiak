@@ -73,118 +73,21 @@ provider_installation {
 
 ## Configuration
 
-### Provider
-
 ```hcl
 provider "kaiak" {
-  endpoint = "http://localhost:8084/api"  # optional
-  api_key  = "my-secret-token"           # optional, sensitive
+  endpoint = "http://localhost:8084/api"  # optional (env: KAIAK_ENDPOINT)
+  api_key  = "my-secret-token"           # optional (env: KAIAK_API_KEY)
 }
-```
 
-| Attribute  | Description | Default | Environment Variable |
-|------------|-------------|---------|---------------------|
-| `endpoint` | Base URL of the Kaiak server API | `http://localhost:8084/api` | `KAIAK_ENDPOINT` |
-| `api_key`  | Bearer token for authentication | _(none)_ | `KAIAK_API_KEY` |
-
-Both attributes can be set via environment variables instead of (or in addition to)
-the provider block. Config values take precedence over environment variables.
-
-HTTP request/response tracing can be enabled by setting the `KAIAK_TRACE`
-environment variable (any value for headers, `verbose` for headers + bodies).
-See [Debugging & Tracing](#debugging--tracing) below.
-
-### Resources
-
-Resources are discovered dynamically from the running server. Each resource type
-registered with the server becomes available as `kaiak_<resource_type>`. For example,
-if the server has an `httpserver` resource type:
-
-```hcl
 resource "kaiak_httpserver" "main" {
-  name = "main"
+  name   = "main"
   listen = ":8080"
 }
 ```
 
-Every resource has two fixed attributes:
-
-| Attribute | Description |
-|-----------|-------------|
-| `name`    | Instance label (e.g. `"main"`). Changing this forces recreation. |
-| `id`      | Fully qualified instance name (`resource_type.label`). Computed. |
-
-Additional attributes are determined by the server's resource schema. Dotted
-attribute names (e.g. `tls.cert`) are mapped to nested blocks in Terraform:
-
-```hcl
-resource "kaiak_httpserver" "secure" {
-  name   = "secure"
-  listen = ":8443"
-
-  tls {
-    cert = "/path/to/cert.pem"
-    key  = "/path/to/key.pem"
-  }
-}
-```
-
-### Data Sources
-
-#### `kaiak_resources`
-
-Lists available resource types and their instances on the server.
-
-```hcl
-data "kaiak_resources" "all" {}
-
-data "kaiak_resources" "servers" {
-  type = "httpserver"
-}
-```
-
-| Attribute       | Description |
-|-----------------|-------------|
-| `type`          | Filter by resource type name (optional) |
-| `provider_name` | Provider name (computed) |
-| `version`       | Provider version (computed) |
-| `resources`     | List of resource types with their attributes and instances (computed) |
-
-### Importing Resources
-
-Resources can be imported using their fully qualified name:
-
-```sh
-terraform import kaiak_httpserver.main httpserver.main
-```
-
-The import ID must match the resource type of the block — for example,
-importing `httpstatic.docs` into a `kaiak_httpserver` block will produce
-an error. The expected format is `<resource_type>.<label>`.
-
-## Debugging & Tracing
-
-### Debug Mode
-
-To start the provider in debug mode (useful with a debugger or
-`TF_REATTACH_PROVIDERS`):
-
-```sh
-terraform-provider-kaiak -debug
-```
-
-### HTTP Request Tracing
-
-Set the `KAIAK_TRACE` environment variable to log HTTP requests and responses
-to stderr. This is useful for diagnosing connectivity or API issues:
-
-```sh
-# Log request/response headers
-export KAIAK_TRACE=true
-
-# Log headers and response bodies
-export KAIAK_TRACE=verbose
-```
+For full documentation on resources, data sources, importing, nested blocks,
+and debugging, see the
+[provider documentation on the Terraform Registry](https://registry.terraform.io/providers/mutablelogic/kaiak/latest/docs).
 
 ## License
 
