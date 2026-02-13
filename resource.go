@@ -309,7 +309,7 @@ func (r *dynamicResource) writeState(ctx context.Context, fullName, name string,
 			continue
 		}
 		v := kaiakState[info.kaiakName]
-		diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakValueToTF(v, info.attr.Type))...)
+		diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakValueToTF(ctx, v, info.attr.Type))...)
 	}
 
 	// Block attributes — set each block as a typed object
@@ -330,7 +330,7 @@ func (r *dynamicResource) writeState(ctx context.Context, fullName, name string,
 			attrTypes[info.tfField] = kaiakTypeToAttrType(info.attr.Type)
 			if v, ok := kaiakState[info.kaiakName]; ok && v != nil {
 				hasValue = true
-				attrValues[info.tfField] = kaiakValueToTF(v, info.attr.Type)
+				attrValues[info.tfField] = kaiakValueToTF(ctx, v, info.attr.Type)
 			} else {
 				attrValues[info.tfField] = kaiakNullValue(info.attr.Type)
 			}

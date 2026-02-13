@@ -1,8 +1,8 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	// Packages
@@ -12,6 +12,7 @@ import (
 	planmodifier "github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	stringplanmodifier "github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	types "github.com/hashicorp/terraform-plugin-framework/types"
+	tflog "github.com/hashicorp/terraform-plugin-log/tflog"
 	schema "github.com/mutablelogic/go-server/pkg/provider/schema"
 )
 
@@ -132,7 +133,7 @@ func kaiakTypeToAttrType(t string) attr.Type {
 }
 
 // kaiakValueToTF converts a kaiak state value to a terraform attr.Value.
-func kaiakValueToTF(v any, t string) attr.Value {
+func kaiakValueToTF(ctx context.Context, v any, t string) attr.Value {
 	if v == nil {
 		return kaiakNullValue(t)
 	}
@@ -153,7 +154,11 @@ func kaiakValueToTF(v any, t string) attr.Value {
 	// Value does not match its declared type — fall back to string but
 	// log the mismatch so server-side data issues are not silently hidden.
 	if t != "string" {
-		log.Printf("[WARN] kaiak attribute type mismatch: declared %q but got %T (%v); coercing to string", t, v, v)
+		tflog.Warn(ctx, "Kaiak attribute type mismatch: coercing to string", map[string]interface{}{
+			"declared_type": t,
+			"actual_type":   fmt.Sprintf("%T", v),
+			"value":         fmt.Sprintf("%v", v),
+		})
 	}
 	return types.StringValue(fmt.Sprintf("%v", v))
 }
