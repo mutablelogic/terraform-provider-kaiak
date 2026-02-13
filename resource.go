@@ -158,7 +158,7 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	// Read back the full state from the server
-	r.writeState(ctx, fullName, label, &resp.State, &resp.Diagnostics)
+	r.writeState(ctx, fullName, label, &resp.State, &resp.Diagnostics, req.Plan)
 }
 
 func (r *dynamicResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -186,7 +186,7 @@ func (r *dynamicResource) Read(ctx context.Context, req resource.ReadRequest, re
 		}
 	}
 
-	r.writeState(ctx, id.ValueString(), label, &resp.State, &resp.Diagnostics)
+	r.writeState(ctx, id.ValueString(), label, &resp.State, &resp.Diagnostics, req.State)
 }
 
 func (r *dynamicResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -223,7 +223,7 @@ func (r *dynamicResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	r.writeState(ctx, fullName, name.ValueString(), &resp.State, &resp.Diagnostics)
+	r.writeState(ctx, fullName, name.ValueString(), &resp.State, &resp.Diagnostics, req.Plan)
 }
 
 func (r *dynamicResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -317,7 +317,10 @@ func (r *dynamicResource) extractAttrs(ctx context.Context, src attrGetter, diag
 
 // writeState fetches the instance from the server and populates
 // the terraform state with the id, name, and all resource attributes.
-func (r *dynamicResource) writeState(ctx context.Context, fullName, name string, tfState *tfsdk.State, diags *diag.Diagnostics) {
+// For writable attributes not present in the server state, the value
+// from fallback (typically the plan or prior state) is preserved so
+// Terraform's consistency check does not fail.
+func (r *dynamicResource) writeState(ctx context.Context, fullName, name string, tfState *tfsdk.State, diags *diag.Diagnostics, fallback attrGetter) {
 	result, err := r.client.GetResourceInstance(ctx, fullName)
 	if err != nil {
 		diags.AddError("Failed to read resource instance", err.Error())
@@ -336,7 +339,20 @@ func (r *dynamicResource) writeState(ctx context.Context, fullName, name string,
 			continue
 		}
 		v := kaiakState[info.kaiakName]
-		diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakValueToTF(ctx, v, info.attr.Type))...)
+		if v != nil {
+			diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakValueToTF(ctx, v, info.attr.Type))...)
+		} else if !info.attr.ReadOnly && fallback != nil {
+			// Server didn't return this writable attr — preserve from plan/state
+			var fv attr.Value
+			diags.Append(fallback.GetAttribute(ctx, path.Root(info.tfField), &fv)...)
+			if fv != nil && !fv.IsNull() && !fv.IsUnknown() {
+				diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), fv)...)
+			} else {
+				diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakNullValue(info.attr.Type))...)
+			}
+		} else {
+			diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakNullValue(info.attr.Type))...)
+		}
 	}
 
 	// Block attributes — set each block as a typed object
@@ -349,6 +365,16 @@ func (r *dynamicResource) writeState(ctx context.Context, fullName, name string,
 	}
 
 	for blockName, infos := range blockGroups {
+		// Read fallback block from plan/state so we can preserve writable fields
+		var fallbackBlock types.Object
+		if fallback != nil {
+			fallback.GetAttribute(ctx, path.Root(blockName), &fallbackBlock)
+		}
+		var fallbackAttrs map[string]attr.Value
+		if !fallbackBlock.IsNull() && !fallbackBlock.IsUnknown() {
+			fallbackAttrs = fallbackBlock.Attributes()
+		}
+
 		attrTypes := make(map[string]attr.Type, len(infos))
 		attrValues := make(map[string]attr.Value, len(infos))
 		hasValue := false
@@ -358,6 +384,13 @@ func (r *dynamicResource) writeState(ctx context.Context, fullName, name string,
 			if v, ok := kaiakState[info.kaiakName]; ok && v != nil {
 				hasValue = true
 				attrValues[info.tfField] = kaiakValueToTF(ctx, v, info.attr.Type)
+			} else if !info.attr.ReadOnly && fallbackAttrs != nil {
+				if fv, ok := fallbackAttrs[info.tfField]; ok && fv != nil && !fv.IsNull() && !fv.IsUnknown() {
+					hasValue = true
+					attrValues[info.tfField] = fv
+				} else {
+					attrValues[info.tfField] = kaiakNullValue(info.attr.Type)
+				}
 			} else {
 				attrValues[info.tfField] = kaiakNullValue(info.attr.Type)
 			}
