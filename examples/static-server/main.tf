@@ -35,11 +35,11 @@ resource "kaiak_httprouter" "main" {
   title    = "Static File Server"
   version  = "1.0.0"
   openapi  = true
-  handlers = [kaiak_httpstatic.files.name]
+  handlers = [kaiak_httpstatic.files.id]
 }
 
 # HTTP server on port 9090 using the router
 resource "kaiak_httpserver" "main" {
   listen = ":9090"
-  router = kaiak_httprouter.main.name
+  router = kaiak_httprouter.main.id
 }
