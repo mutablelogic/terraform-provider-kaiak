@@ -255,7 +255,14 @@ func kaiakMapToTF(ctx context.Context, v any, t string) attr.Value {
 	if !ok {
 		return types.MapNull(elemType)
 	}
-	valType := t[strings.Index(t, "]")+1:]
+	idx := strings.Index(t, "]")
+	if idx < 0 || idx+1 >= len(t) {
+		tflog.Warn(ctx, "Malformed map type string, treating values as strings", map[string]interface{}{
+			"type": t,
+		})
+		return types.MapNull(types.StringType)
+	}
+	valType := t[idx+1:]
 	elems := make(map[string]attr.Value, len(items))
 	for k, item := range items {
 		elems[k] = kaiakValueToTF(ctx, item, valType)

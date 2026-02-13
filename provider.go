@@ -59,6 +59,23 @@ func resolveApiKey() string {
 	return os.Getenv("KAIAK_API_KEY")
 }
 
+// clientOpts returns the common client options for the given API key,
+// including request tracing when KAIAK_TRACE is set.
+func clientOpts(apiKey string) []client.ClientOpt {
+	var opts []client.ClientOpt
+	if apiKey != "" {
+		opts = append(opts, client.OptReqToken(client.Token{
+			Scheme: client.Bearer,
+			Value:  apiKey,
+		}))
+	}
+	if os.Getenv("KAIAK_TRACE") != "" {
+		verbose := os.Getenv("KAIAK_TRACE") == "verbose"
+		opts = append(opts, client.OptTrace(os.Stderr, verbose))
+	}
+	return opts
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // PROVIDER INTERFACE
 
@@ -109,17 +126,8 @@ func (p *kaiakProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	p.endpoint = endpoint
 	p.apiKey = apiKey
 
-	// Build client options
-	var opts []client.ClientOpt
-	if apiKey != "" {
-		opts = append(opts, client.OptReqToken(client.Token{
-			Scheme: client.Bearer,
-			Value:  apiKey,
-		}))
-	}
-
 	// Create the HTTP client
-	cl, err := httpclient.New(endpoint, opts...)
+	cl, err := httpclient.New(endpoint, clientOpts(apiKey)...)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create Kaiak client", err.Error())
 		return
@@ -149,16 +157,7 @@ func (p *kaiakProvider) Resources(ctx context.Context) []func() resource.Resourc
 		apiKey = resolveApiKey()
 	}
 
-	// Build client options with optional auth token
-	var opts []client.ClientOpt
-	if apiKey != "" {
-		opts = append(opts, client.OptReqToken(client.Token{
-			Scheme: client.Bearer,
-			Value:  apiKey,
-		}))
-	}
-
-	cl, err := httpclient.New(endpoint, opts...)
+	cl, err := httpclient.New(endpoint, clientOpts(apiKey)...)
 	if err != nil {
 		tflog.Error(ctx, "Failed to create Kaiak client. No resources will be available.", map[string]interface{}{
 			"endpoint": endpoint,

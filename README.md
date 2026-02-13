@@ -86,6 +86,7 @@ provider "kaiak" {
 |------------|-------------|---------|---------------------|
 | `endpoint` | Base URL of the Kaiak server API | `http://localhost:8084/api` | `KAIAK_ENDPOINT` |
 | `api_key`  | Bearer token for authentication | _(none)_ | `KAIAK_API_KEY` |
+| | HTTP request/response tracing | _(disabled)_ | `KAIAK_TRACE` (set for headers, `verbose` for headers + bodies) |
 
 Both attributes can be set via environment variables instead of (or in addition to)
 the provider block. Config values take precedence over environment variables.
@@ -152,6 +153,34 @@ Resources can be imported using their fully qualified name:
 
 ```sh
 terraform import kaiak_httpserver.main httpserver.main
+```
+
+The import ID must match the resource type of the block — for example,
+importing `httpstatic.docs` into a `kaiak_httpserver` block will produce
+an error. The expected format is `<resource_type>.<label>`.
+
+## Debugging & Tracing
+
+### Debug Mode
+
+To start the provider in debug mode (useful with a debugger or
+`TF_REATTACH_PROVIDERS`):
+
+```sh
+terraform-provider-kaiak -debug
+```
+
+### HTTP Request Tracing
+
+Set the `KAIAK_TRACE` environment variable to log HTTP requests and responses
+to stderr. This is useful for diagnosing connectivity or API issues:
+
+```sh
+# Log request/response headers
+export KAIAK_TRACE=true
+
+# Log headers and response bodies
+export KAIAK_TRACE=verbose
 ```
 
 ## License

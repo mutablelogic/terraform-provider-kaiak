@@ -356,8 +356,9 @@ func extractSingleAttr(ctx context.Context, src attrGetter, p path.Path, info at
 		var v types.Map
 		diags.Append(src.GetAttribute(ctx, p, &v)...)
 		if !v.IsNull() && !v.IsUnknown() {
-			valType := info.attr.Type[strings.Index(info.attr.Type, "]")+1:]
-			state[info.kaiakName] = tfMapToKaiak(v, valType)
+			if idx := strings.Index(info.attr.Type, "]"); idx >= 0 && idx+1 < len(info.attr.Type) {
+				state[info.kaiakName] = tfMapToKaiak(v, info.attr.Type[idx+1:])
+			}
 		}
 	default:
 		var v types.String
@@ -390,8 +391,9 @@ func extractBlockAttr(info attrInfo, v attr.Value, state schema.State) {
 		}
 	case strings.HasPrefix(info.attr.Type, "map["):
 		if mv, ok := v.(types.Map); ok && !mv.IsNull() && !mv.IsUnknown() {
-			valType := info.attr.Type[strings.Index(info.attr.Type, "]")+1:]
-			state[info.kaiakName] = tfMapToKaiak(mv, valType)
+			if idx := strings.Index(info.attr.Type, "]"); idx >= 0 && idx+1 < len(info.attr.Type) {
+				state[info.kaiakName] = tfMapToKaiak(mv, info.attr.Type[idx+1:])
+			}
 		}
 	default:
 		if sv, ok := v.(types.String); ok && !sv.IsNull() && !sv.IsUnknown() {
