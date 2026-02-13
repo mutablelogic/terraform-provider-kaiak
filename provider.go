@@ -110,6 +110,18 @@ func (p *kaiakProvider) Configure(ctx context.Context, req provider.ConfigureReq
 		return
 	}
 
+	// Reject unknown values — they can cause silent fallback to env/defaults
+	if config.Endpoint.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown endpoint",
+			"The \"endpoint\" attribute is not yet known. Set it to a concrete value or use the KAIAK_ENDPOINT environment variable.")
+		return
+	}
+	if config.ApiKey.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown api_key",
+			"The \"api_key\" attribute is not yet known. Set it to a concrete value or use the KAIAK_API_KEY environment variable.")
+		return
+	}
+
 	// Resolve endpoint: config value > environment variable > default
 	endpoint := config.Endpoint.ValueString()
 	if endpoint == "" {

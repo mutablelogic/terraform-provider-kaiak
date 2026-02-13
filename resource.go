@@ -102,6 +102,11 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if name.IsNull() || name.IsUnknown() {
+		resp.Diagnostics.AddError("Missing resource name",
+			"The \"name\" attribute must be a known, non-null value at apply time.")
+		return
+	}
 
 	fullName := r.fullName(name.ValueString())
 
@@ -218,7 +223,10 @@ func (r *dynamicResource) Delete(ctx context.Context, req resource.DeleteRequest
 	_, err := r.client.DestroyResourceInstance(ctx, id.ValueString(), false)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to destroy resource instance", err.Error())
+		return
 	}
+
+	resp.State.RemoveResource(ctx)
 }
 
 func (r *dynamicResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

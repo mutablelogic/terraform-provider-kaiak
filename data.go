@@ -155,7 +155,13 @@ func (d *resourcesDataSource) Read(ctx context.Context, req datasource.ReadReque
 
 	// Build the list request
 	listReq := schema.ListResourcesRequest{}
-	if !config.Type.IsNull() && !config.Type.IsUnknown() {
+	if config.Type.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown type filter",
+			"The \"type\" attribute is not yet known. This data source cannot be read during plan "+
+				"when the type filter depends on another resource's output.")
+		return
+	}
+	if !config.Type.IsNull() {
 		t := config.Type.ValueString()
 		listReq.Type = &t
 	}
