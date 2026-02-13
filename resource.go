@@ -37,6 +37,17 @@ type attrGetter interface {
 var _ resource.Resource = (*dynamicResource)(nil)
 var _ resource.ResourceWithImportState = (*dynamicResource)(nil)
 
+// getInfos returns the cached attrInfo slice, building it on first call.
+// This is necessary because the Terraform framework may call Schema() on one
+// resource instance and CRUD methods on a different instance.
+func (r *dynamicResource) getInfos() []attrInfo {
+	if r.infos == nil {
+		_, infos, _ := buildResourceSchema(r.meta.Name, r.meta.Attributes)
+		r.infos = infos
+	}
+	return r.infos
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // LIFECYCLE
 
@@ -53,7 +64,7 @@ func (r *dynamicResource) fullName(label string) string {
 func generateLabel() string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
-	return "tf" + hex.EncodeToString(b)
+	return "tf_" + hex.EncodeToString(b)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -105,18 +116,7 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	// Read the instance label, auto-generate if not provided
-	var name types.String
-	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &name)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	label := name.ValueString()
-	if name.IsNull() || name.IsUnknown() || label == "" {
-		label = generateLabel()
-	}
-
+	label := generateLabel()
 	fullName := r.fullName(label)
 
 	// Create the instance on the server
@@ -158,7 +158,7 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	// Read back the full state from the server
-	r.writeState(ctx, fullName, label, &resp.State, &resp.Diagnostics, req.Plan)
+	r.writeState(ctx, fullName, &resp.State, &resp.Diagnostics, attrs)
 }
 
 func (r *dynamicResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -172,21 +172,7 @@ func (r *dynamicResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	var name types.String
-	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("name"), &name)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Derive label from id when name is not in state (e.g. after import)
-	label := name.ValueString()
-	if name.IsNull() || name.IsUnknown() || label == "" {
-		if parts := strings.SplitN(id.ValueString(), ".", 2); len(parts) == 2 {
-			label = parts[1]
-		}
-	}
-
-	r.writeState(ctx, id.ValueString(), label, &resp.State, &resp.Diagnostics, req.State)
+	r.writeState(ctx, id.ValueString(), &resp.State, &resp.Diagnostics, nil)
 }
 
 func (r *dynamicResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -196,12 +182,6 @@ func (r *dynamicResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	var id types.String
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("id"), &id)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	var name types.String
-	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &name)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -223,7 +203,7 @@ func (r *dynamicResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	r.writeState(ctx, fullName, name.ValueString(), &resp.State, &resp.Diagnostics, req.Plan)
+	r.writeState(ctx, fullName, &resp.State, &resp.Diagnostics, attrs)
 }
 
 func (r *dynamicResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -248,7 +228,6 @@ func (r *dynamicResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 func (r *dynamicResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// Import by fully qualified name (e.g. "httpstatic.docs").
-	// Parse the ID into resource_type and label so that "name" is populated.
 	parts := strings.SplitN(req.ID, ".", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		resp.Diagnostics.AddError("Invalid import ID",
@@ -277,7 +256,7 @@ func (r *dynamicResource) extractAttrs(ctx context.Context, src attrGetter, diag
 	state := make(schema.State)
 
 	// Top-level attributes
-	for _, info := range r.infos {
+	for _, info := range r.getInfos() {
 		if info.attr.ReadOnly || info.tfBlock != "" {
 			continue
 		}
@@ -286,7 +265,7 @@ func (r *dynamicResource) extractAttrs(ctx context.Context, src attrGetter, diag
 
 	// Block attributes — group by block name
 	blockGroups := map[string][]attrInfo{}
-	for _, info := range r.infos {
+	for _, info := range r.getInfos() {
 		if info.attr.ReadOnly || info.tfBlock == "" {
 			continue
 		}
@@ -316,11 +295,11 @@ func (r *dynamicResource) extractAttrs(ctx context.Context, src attrGetter, diag
 // PRIVATE — kaiak State → terraform state
 
 // writeState fetches the instance from the server and populates
-// the terraform state with the id, name, and all resource attributes.
+// the terraform state with the id and all resource attributes.
 // For writable attributes not present in the server state, the value
-// from fallback (typically the plan or prior state) is preserved so
-// Terraform's consistency check does not fail.
-func (r *dynamicResource) writeState(ctx context.Context, fullName, name string, tfState *tfsdk.State, diags *diag.Diagnostics, fallback attrGetter) {
+// from plannedAttrs (the Go values extracted from the plan) is preserved
+// so Terraform's consistency check does not fail.
+func (r *dynamicResource) writeState(ctx context.Context, fullName string, tfState *tfsdk.State, diags *diag.Diagnostics, plannedAttrs schema.State) {
 	result, err := r.client.GetResourceInstance(ctx, fullName)
 	if err != nil {
 		diags.AddError("Failed to read resource instance", err.Error())
@@ -331,33 +310,37 @@ func (r *dynamicResource) writeState(ctx context.Context, fullName, name string,
 
 	// Fixed attributes
 	diags.Append(tfState.SetAttribute(ctx, path.Root("id"), types.StringValue(fullName))...)
-	diags.Append(tfState.SetAttribute(ctx, path.Root("name"), types.StringValue(name))...)
+
+	// Merge: server state wins, then fall back to planned values for writable attrs
+	merged := make(schema.State, len(kaiakState))
+	for k, v := range kaiakState {
+		merged[k] = v
+	}
+	if plannedAttrs != nil {
+		for _, info := range r.getInfos() {
+			if info.attr.ReadOnly {
+				continue
+			}
+			if _, ok := merged[info.kaiakName]; !ok {
+				if pv, ok := plannedAttrs[info.kaiakName]; ok {
+					merged[info.kaiakName] = pv
+				}
+			}
+		}
+	}
 
 	// Top-level attributes
-	for _, info := range r.infos {
+	for _, info := range r.getInfos() {
 		if info.tfBlock != "" {
 			continue
 		}
-		v := kaiakState[info.kaiakName]
-		if v != nil {
-			diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakValueToTF(ctx, v, info.attr.Type))...)
-		} else if !info.attr.ReadOnly && fallback != nil {
-			// Server didn't return this writable attr — preserve from plan/state
-			var fv attr.Value
-			diags.Append(fallback.GetAttribute(ctx, path.Root(info.tfField), &fv)...)
-			if fv != nil && !fv.IsNull() && !fv.IsUnknown() {
-				diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), fv)...)
-			} else {
-				diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakNullValue(info.attr.Type))...)
-			}
-		} else {
-			diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakNullValue(info.attr.Type))...)
-		}
+		v := merged[info.kaiakName]
+		diags.Append(tfState.SetAttribute(ctx, path.Root(info.tfField), kaiakValueToTF(ctx, v, info.attr.Type))...)
 	}
 
 	// Block attributes — set each block as a typed object
 	blockGroups := map[string][]attrInfo{}
-	for _, info := range r.infos {
+	for _, info := range r.getInfos() {
 		if info.tfBlock == "" {
 			continue
 		}
@@ -365,32 +348,15 @@ func (r *dynamicResource) writeState(ctx context.Context, fullName, name string,
 	}
 
 	for blockName, infos := range blockGroups {
-		// Read fallback block from plan/state so we can preserve writable fields
-		var fallbackBlock types.Object
-		if fallback != nil {
-			fallback.GetAttribute(ctx, path.Root(blockName), &fallbackBlock)
-		}
-		var fallbackAttrs map[string]attr.Value
-		if !fallbackBlock.IsNull() && !fallbackBlock.IsUnknown() {
-			fallbackAttrs = fallbackBlock.Attributes()
-		}
-
 		attrTypes := make(map[string]attr.Type, len(infos))
 		attrValues := make(map[string]attr.Value, len(infos))
 		hasValue := false
 
 		for _, info := range infos {
 			attrTypes[info.tfField] = kaiakTypeToAttrType(info.attr.Type)
-			if v, ok := kaiakState[info.kaiakName]; ok && v != nil {
+			if v, ok := merged[info.kaiakName]; ok && v != nil {
 				hasValue = true
 				attrValues[info.tfField] = kaiakValueToTF(ctx, v, info.attr.Type)
-			} else if !info.attr.ReadOnly && fallbackAttrs != nil {
-				if fv, ok := fallbackAttrs[info.tfField]; ok && fv != nil && !fv.IsNull() && !fv.IsUnknown() {
-					hasValue = true
-					attrValues[info.tfField] = fv
-				} else {
-					attrValues[info.tfField] = kaiakNullValue(info.attr.Type)
-				}
 			} else {
 				attrValues[info.tfField] = kaiakNullValue(info.attr.Type)
 			}

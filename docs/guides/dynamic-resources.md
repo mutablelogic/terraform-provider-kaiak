@@ -26,7 +26,7 @@ resource "kaiak_httpserver" "main" {
 resource "kaiak_httpstatic" "docs" {
   path       = "/docs"
   dir        = "/var/www/docs"
-  httpserver = kaiak_httpserver.main.name
+  httpserver = kaiak_httpserver.main.id
 }
 
 resource "kaiak_logger" "default" {
@@ -35,13 +35,10 @@ resource "kaiak_logger" "default" {
 
 ## Fixed Attributes
 
-Every dynamic resource has two fixed attributes:
+Every dynamic resource has one fixed attribute:
 
-* `name` - (Optional) The instance label (e.g. `"main"`). If omitted, a unique
-  label is auto-generated. Changing this forces the resource to be destroyed
-  and recreated.
 * `id` - (Computed) The fully qualified instance name (`resource_type.label`),
-  for example `"httpserver.main"`.
+  for example `"httpserver.main"`. A unique label is auto-generated on creation.
 
 All other attributes are determined by the server's resource schema.
 

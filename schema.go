@@ -45,8 +45,7 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 	var infos []attrInfo
 	seen := map[string]string{}  // "block/field" → original kaiak name
 	reserved := map[string]bool{ // top-level names reserved for internal use
-		"name": true,
-		"id":   true,
+		"id": true,
 	}
 	for _, a := range kaiakAttrs {
 		info := newAttrInfo(a)
@@ -73,15 +72,6 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 
 	// Separate top-level attributes from block members
 	tfAttrs := map[string]tfschema.Attribute{
-		"name": tfschema.StringAttribute{
-			Description: "Instance label (e.g. \"main\"). Auto-generated if omitted.",
-			Optional:    true,
-			Computed:    true,
-			PlanModifiers: []planmodifier.String{
-				stringplanmodifier.RequiresReplace(),
-				stringplanmodifier.UseStateForUnknown(),
-			},
-		},
 		"id": tfschema.StringAttribute{
 			Description: "Fully qualified instance name (resource_type.label).",
 			Computed:    true,
