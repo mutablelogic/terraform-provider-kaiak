@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	// Packages
 	attr "github.com/hashicorp/terraform-plugin-framework/attr"
@@ -108,12 +109,31 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 	for blockName, blockAttrs := range blocks {
 		required := false
 		for _, a := range blockAttrs {
-			if sa, ok := a.(tfschema.StringAttribute); ok && sa.Required {
-				required = true
-			} else if ba, ok := a.(tfschema.BoolAttribute); ok && ba.Required {
-				required = true
-			} else if ia, ok := a.(tfschema.Int64Attribute); ok && ia.Required {
-				required = true
+			switch ta := a.(type) {
+			case tfschema.StringAttribute:
+				if ta.Required {
+					required = true
+				}
+			case tfschema.BoolAttribute:
+				if ta.Required {
+					required = true
+				}
+			case tfschema.Int64Attribute:
+				if ta.Required {
+					required = true
+				}
+			case tfschema.Float64Attribute:
+				if ta.Required {
+					required = true
+				}
+			case tfschema.ListAttribute:
+				if ta.Required {
+					required = true
+				}
+			case tfschema.MapAttribute:
+				if ta.Required {
+					required = true
+				}
 			}
 		}
 		tfAttrs[blockName] = tfschema.SingleNestedAttribute{
@@ -135,14 +155,29 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 
 // kaiakTypeToAttrType returns the terraform attr.Type for a kaiak type string.
 func kaiakTypeToAttrType(t string) attr.Type {
-	switch t {
-	case "bool":
+	switch {
+	case t == "bool":
 		return types.BoolType
-	case "int":
+	case t == "int" || t == "uint":
 		return types.Int64Type
+	case t == "float":
+		return types.Float64Type
+	case strings.HasPrefix(t, "[]"):
+		return types.ListType{ElemType: kaiakTypeToAttrType(t[2:])}
+	case strings.HasPrefix(t, "map["):
+		return types.MapType{ElemType: kaiakMapElemType(t)}
 	default:
 		return types.StringType
 	}
+}
+
+// kaiakMapElemType extracts the value type from a kaiak map type string
+// like "map[string]int" and returns the corresponding terraform attr.Type.
+func kaiakMapElemType(t string) attr.Type {
+	if idx := strings.Index(t, "]"); idx >= 0 && idx+1 < len(t) {
+		return kaiakTypeToAttrType(t[idx+1:])
+	}
+	return types.StringType
 }
 
 // kaiakValueToTF converts a kaiak state value to a terraform attr.Value.
@@ -150,24 +185,43 @@ func kaiakValueToTF(ctx context.Context, v any, t string) attr.Value {
 	if v == nil {
 		return kaiakNullValue(t)
 	}
-	switch t {
-	case "bool":
+	switch {
+	case t == "bool":
 		if b, ok := v.(bool); ok {
 			return types.BoolValue(b)
 		}
-	case "int":
+	case t == "int" || t == "uint":
 		switch n := v.(type) {
 		case float64:
 			return types.Int64Value(int64(n))
 		case int:
 			return types.Int64Value(int64(n))
 		}
+	case t == "float":
+		switch n := v.(type) {
+		case float64:
+			return types.Float64Value(n)
+		case int:
+			return types.Float64Value(float64(n))
+		}
+	case strings.HasPrefix(t, "[]"):
+		return kaiakSliceToTF(ctx, v, t)
+	case strings.HasPrefix(t, "map["):
+		return kaiakMapToTF(ctx, v, t)
+	case t == "time":
+		// The server marshals time.Time as RFC 3339 via JSON.
+		if s, ok := v.(string); ok {
+			if parsed, err := time.Parse(time.RFC3339, s); err == nil {
+				return types.StringValue(parsed.Format(time.RFC3339))
+			}
+			return types.StringValue(s)
+		}
 	}
 
 	// Value does not match its declared type — fall back to string but
 	// log the mismatch so server-side data issues are not silently hidden.
 	// The raw value is intentionally omitted to avoid leaking sensitive data.
-	if t != "string" {
+	if t != "string" && t != "duration" && t != "ref" {
 		tflog.Warn(ctx, "Kaiak attribute type mismatch: coercing to string", map[string]interface{}{
 			"declared_type": t,
 			"actual_type":   fmt.Sprintf("%T", v),
@@ -176,13 +230,56 @@ func kaiakValueToTF(ctx context.Context, v any, t string) attr.Value {
 	return types.StringValue(fmt.Sprintf("%v", v))
 }
 
+// kaiakSliceToTF converts a kaiak slice value to a terraform ListValue.
+func kaiakSliceToTF(ctx context.Context, v any, t string) attr.Value {
+	elemType := kaiakTypeToAttrType(t[2:])
+	items, ok := v.([]interface{})
+	if !ok {
+		return types.ListNull(elemType)
+	}
+	elems := make([]attr.Value, 0, len(items))
+	for _, item := range items {
+		elems = append(elems, kaiakValueToTF(ctx, item, t[2:]))
+	}
+	list, diags := types.ListValue(elemType, elems)
+	if diags.HasError() {
+		return types.ListNull(elemType)
+	}
+	return list
+}
+
+// kaiakMapToTF converts a kaiak map value to a terraform MapValue.
+func kaiakMapToTF(ctx context.Context, v any, t string) attr.Value {
+	elemType := kaiakMapElemType(t)
+	items, ok := v.(map[string]interface{})
+	if !ok {
+		return types.MapNull(elemType)
+	}
+	valType := t[strings.Index(t, "]")+1:]
+	elems := make(map[string]attr.Value, len(items))
+	for k, item := range items {
+		elems[k] = kaiakValueToTF(ctx, item, valType)
+	}
+	m, diags := types.MapValue(elemType, elems)
+	if diags.HasError() {
+		return types.MapNull(elemType)
+	}
+	return m
+}
+
 // kaiakNullValue returns a typed null for the given kaiak type.
 func kaiakNullValue(t string) attr.Value {
-	switch t {
-	case "bool":
+	switch {
+	case t == "bool":
 		return types.BoolNull()
-	case "int":
+	case t == "int" || t == "uint":
 		return types.Int64Null()
+	case t == "float":
+		return types.Float64Null()
+	case strings.HasPrefix(t, "[]"):
+		return types.ListNull(kaiakTypeToAttrType(t[2:]))
+	case strings.HasPrefix(t, "map["):
+		return types.MapNull(kaiakMapElemType(t))
 	default:
 		return types.StringNull()
 	}
@@ -210,8 +307,8 @@ func newAttrInfo(a schema.Attribute) attrInfo {
 func kaiakAttrToTF(a schema.Attribute) tfschema.Attribute {
 	opt := !a.Required && !a.ReadOnly
 	computed := a.ReadOnly || opt // server may fill in defaults for optional attrs
-	switch a.Type {
-	case "bool":
+	switch {
+	case a.Type == "bool":
 		return tfschema.BoolAttribute{
 			Description: a.Description,
 			Required:    a.Required,
@@ -219,9 +316,35 @@ func kaiakAttrToTF(a schema.Attribute) tfschema.Attribute {
 			Computed:    computed,
 			Sensitive:   a.Sensitive,
 		}
-	case "int":
+	case a.Type == "int" || a.Type == "uint":
 		return tfschema.Int64Attribute{
 			Description: a.Description,
+			Required:    a.Required,
+			Optional:    opt,
+			Computed:    computed,
+			Sensitive:   a.Sensitive,
+		}
+	case a.Type == "float":
+		return tfschema.Float64Attribute{
+			Description: a.Description,
+			Required:    a.Required,
+			Optional:    opt,
+			Computed:    computed,
+			Sensitive:   a.Sensitive,
+		}
+	case strings.HasPrefix(a.Type, "[]"):
+		return tfschema.ListAttribute{
+			Description: a.Description,
+			ElementType: kaiakTypeToAttrType(a.Type[2:]),
+			Required:    a.Required,
+			Optional:    opt,
+			Computed:    computed,
+			Sensitive:   a.Sensitive,
+		}
+	case strings.HasPrefix(a.Type, "map["):
+		return tfschema.MapAttribute{
+			Description: a.Description,
+			ElementType: kaiakMapElemType(a.Type),
 			Required:    a.Required,
 			Optional:    opt,
 			Computed:    computed,

@@ -204,6 +204,13 @@ func (r *dynamicResource) ImportState(ctx context.Context, req resource.ImportSt
 		return
 	}
 
+	if parts[0] != r.meta.Name {
+		resp.Diagnostics.AddError("Resource type mismatch",
+			fmt.Sprintf("Import ID %q has resource type %q, but this resource block is kaiak_%s. "+
+				"Use the matching resource type or correct the import ID.", req.ID, parts[0], r.meta.Name))
+		return
+	}
+
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), parts[1])...)
 }
@@ -222,26 +229,7 @@ func (r *dynamicResource) extractAttrs(ctx context.Context, src attrGetter, diag
 		if info.attr.ReadOnly || info.tfBlock != "" {
 			continue
 		}
-		switch info.attr.Type {
-		case "bool":
-			var v types.Bool
-			diags.Append(src.GetAttribute(ctx, path.Root(info.tfField), &v)...)
-			if !v.IsNull() && !v.IsUnknown() {
-				state[info.kaiakName] = v.ValueBool()
-			}
-		case "int":
-			var v types.Int64
-			diags.Append(src.GetAttribute(ctx, path.Root(info.tfField), &v)...)
-			if !v.IsNull() && !v.IsUnknown() {
-				state[info.kaiakName] = v.ValueInt64()
-			}
-		default:
-			var v types.String
-			diags.Append(src.GetAttribute(ctx, path.Root(info.tfField), &v)...)
-			if !v.IsNull() && !v.IsUnknown() {
-				state[info.kaiakName] = v.ValueString()
-			}
-		}
+		extractSingleAttr(ctx, src, path.Root(info.tfField), info, state, diags)
 	}
 
 	// Block attributes — group by block name
@@ -265,20 +253,7 @@ func (r *dynamicResource) extractAttrs(ctx context.Context, src attrGetter, diag
 			if !ok {
 				continue
 			}
-			switch info.attr.Type {
-			case "bool":
-				if bv, ok := v.(types.Bool); ok && !bv.IsNull() && !bv.IsUnknown() {
-					state[info.kaiakName] = bv.ValueBool()
-				}
-			case "int":
-				if iv, ok := v.(types.Int64); ok && !iv.IsNull() && !iv.IsUnknown() {
-					state[info.kaiakName] = iv.ValueInt64()
-				}
-			default:
-				if sv, ok := v.(types.String); ok && !sv.IsNull() && !sv.IsUnknown() {
-					state[info.kaiakName] = sv.ValueString()
-				}
-			}
+			extractBlockAttr(info, v, state)
 		}
 	}
 
@@ -344,4 +319,126 @@ func (r *dynamicResource) writeState(ctx context.Context, fullName, name string,
 			diags.Append(tfState.SetAttribute(ctx, path.Root(blockName), types.ObjectNull(attrTypes))...)
 		}
 	}
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// PRIVATE — attribute extraction helpers
+
+// extractSingleAttr reads a single top-level terraform attribute and stores
+// the Go value into the kaiak state map, handling all supported types.
+func extractSingleAttr(ctx context.Context, src attrGetter, p path.Path, info attrInfo, state schema.State, diags *diag.Diagnostics) {
+	switch {
+	case info.attr.Type == "bool":
+		var v types.Bool
+		diags.Append(src.GetAttribute(ctx, p, &v)...)
+		if !v.IsNull() && !v.IsUnknown() {
+			state[info.kaiakName] = v.ValueBool()
+		}
+	case info.attr.Type == "int" || info.attr.Type == "uint":
+		var v types.Int64
+		diags.Append(src.GetAttribute(ctx, p, &v)...)
+		if !v.IsNull() && !v.IsUnknown() {
+			state[info.kaiakName] = v.ValueInt64()
+		}
+	case info.attr.Type == "float":
+		var v types.Float64
+		diags.Append(src.GetAttribute(ctx, p, &v)...)
+		if !v.IsNull() && !v.IsUnknown() {
+			state[info.kaiakName] = v.ValueFloat64()
+		}
+	case strings.HasPrefix(info.attr.Type, "[]"):
+		var v types.List
+		diags.Append(src.GetAttribute(ctx, p, &v)...)
+		if !v.IsNull() && !v.IsUnknown() {
+			state[info.kaiakName] = tfListToKaiak(v, info.attr.Type[2:])
+		}
+	case strings.HasPrefix(info.attr.Type, "map["):
+		var v types.Map
+		diags.Append(src.GetAttribute(ctx, p, &v)...)
+		if !v.IsNull() && !v.IsUnknown() {
+			valType := info.attr.Type[strings.Index(info.attr.Type, "]")+1:]
+			state[info.kaiakName] = tfMapToKaiak(v, valType)
+		}
+	default:
+		var v types.String
+		diags.Append(src.GetAttribute(ctx, p, &v)...)
+		if !v.IsNull() && !v.IsUnknown() {
+			state[info.kaiakName] = v.ValueString()
+		}
+	}
+}
+
+// extractBlockAttr reads a single attribute from a block object value and
+// stores the Go value into the kaiak state map.
+func extractBlockAttr(info attrInfo, v attr.Value, state schema.State) {
+	switch {
+	case info.attr.Type == "bool":
+		if bv, ok := v.(types.Bool); ok && !bv.IsNull() && !bv.IsUnknown() {
+			state[info.kaiakName] = bv.ValueBool()
+		}
+	case info.attr.Type == "int" || info.attr.Type == "uint":
+		if iv, ok := v.(types.Int64); ok && !iv.IsNull() && !iv.IsUnknown() {
+			state[info.kaiakName] = iv.ValueInt64()
+		}
+	case info.attr.Type == "float":
+		if fv, ok := v.(types.Float64); ok && !fv.IsNull() && !fv.IsUnknown() {
+			state[info.kaiakName] = fv.ValueFloat64()
+		}
+	case strings.HasPrefix(info.attr.Type, "[]"):
+		if lv, ok := v.(types.List); ok && !lv.IsNull() && !lv.IsUnknown() {
+			state[info.kaiakName] = tfListToKaiak(lv, info.attr.Type[2:])
+		}
+	case strings.HasPrefix(info.attr.Type, "map["):
+		if mv, ok := v.(types.Map); ok && !mv.IsNull() && !mv.IsUnknown() {
+			valType := info.attr.Type[strings.Index(info.attr.Type, "]")+1:]
+			state[info.kaiakName] = tfMapToKaiak(mv, valType)
+		}
+	default:
+		if sv, ok := v.(types.String); ok && !sv.IsNull() && !sv.IsUnknown() {
+			state[info.kaiakName] = sv.ValueString()
+		}
+	}
+}
+
+// tfListToKaiak converts a terraform ListValue to a Go slice for the kaiak API.
+func tfListToKaiak(list types.List, elemType string) []interface{} {
+	elems := list.Elements()
+	result := make([]interface{}, 0, len(elems))
+	for _, e := range elems {
+		result = append(result, tfElemToGo(e, elemType))
+	}
+	return result
+}
+
+// tfMapToKaiak converts a terraform MapValue to a Go map for the kaiak API.
+func tfMapToKaiak(m types.Map, valType string) map[string]interface{} {
+	elems := m.Elements()
+	result := make(map[string]interface{}, len(elems))
+	for k, e := range elems {
+		result[k] = tfElemToGo(e, valType)
+	}
+	return result
+}
+
+// tfElemToGo converts a terraform attr.Value to its Go equivalent for a
+// given kaiak type string.
+func tfElemToGo(v attr.Value, t string) interface{} {
+	switch t {
+	case "bool":
+		if bv, ok := v.(types.Bool); ok {
+			return bv.ValueBool()
+		}
+	case "int", "uint":
+		if iv, ok := v.(types.Int64); ok {
+			return iv.ValueInt64()
+		}
+	case "float":
+		if fv, ok := v.(types.Float64); ok {
+			return fv.ValueFloat64()
+		}
+	}
+	if sv, ok := v.(types.String); ok {
+		return sv.ValueString()
+	}
+	return fmt.Sprintf("%v", v)
 }
