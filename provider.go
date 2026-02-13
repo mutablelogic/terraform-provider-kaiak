@@ -21,7 +21,9 @@ import (
 
 // kaiakProvider implements the Terraform provider for a running Kaiak server.
 type kaiakProvider struct {
-	version string
+	version  string
+	endpoint string // resolved during Configure; used by Resources for discovery
+	apiKey   string // resolved during Configure; used by Resources for discovery
 }
 
 // kaiakProviderModel maps provider schema data to a Go type.
@@ -103,6 +105,10 @@ func (p *kaiakProvider) Configure(ctx context.Context, req provider.ConfigureReq
 		apiKey = resolveApiKey()
 	}
 
+	// Cache resolved values so Resources() uses the same settings
+	p.endpoint = endpoint
+	p.apiKey = apiKey
+
 	// Build client options
 	var opts []client.ClientOpt
 	if apiKey != "" {
@@ -125,15 +131,27 @@ func (p *kaiakProvider) Configure(ctx context.Context, req provider.ConfigureReq
 }
 
 // Resources discovers resource types from the running Kaiak server and
-// returns a factory for each one. The server must be reachable via
-// KAIAK_ENDPOINT (or the default http://localhost:8084/api) at schema-
+// returns a factory for each one. The server must be reachable at schema-
 // discovery time (i.e. during terraform plan / apply).
+//
+// When Configure() has already run, the provider-configured endpoint and
+// API key are used. Otherwise (e.g. during validate or early plan phases)
+// the values fall back to KAIAK_ENDPOINT / KAIAK_API_KEY env vars.
 func (p *kaiakProvider) Resources(ctx context.Context) []func() resource.Resource {
-	endpoint := resolveEndpoint()
+	// Prefer values cached from Configure(); fall back to env vars
+	endpoint := p.endpoint
+	if endpoint == "" {
+		endpoint = resolveEndpoint()
+	}
+
+	apiKey := p.apiKey
+	if apiKey == "" {
+		apiKey = resolveApiKey()
+	}
 
 	// Build client options with optional auth token
 	var opts []client.ClientOpt
-	if apiKey := resolveApiKey(); apiKey != "" {
+	if apiKey != "" {
 		opts = append(opts, client.OptReqToken(client.Token{
 			Scheme: client.Bearer,
 			Value:  apiKey,

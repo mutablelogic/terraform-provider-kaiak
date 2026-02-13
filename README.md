@@ -1,11 +1,17 @@
 # terraform-provider-kaiak
 
 [Kaiak](https://github.com/mutablelogic/go-server) is a platform of composable
-software modules that can be assembled into custom server applications. This
-[Terraform](https://www.terraform.io/) provider lets you manage those modules
+software resources that can be assembled into custom server applications. This
+[Terraform](https://www.terraform.io/) provider lets you manage those resources
 and their configuration as infrastructure-as-code. Resource schemas are discovered
-dynamically from a running server at plan/apply time, so any module registered
+dynamically from a running server at plan/apply time, so any resource registered
 with the server is automatically available in Terraform.
+
+Kaiak is designed to be extensible — you can create your own resource types and
+register them with the server. Once registered, they are immediately available
+for management through this Terraform provider without any changes to the provider
+itself. For more information on how to create custom resources, see the
+[Kaiak repository](https://github.com/mutablelogic/go-server).
 
 ## Requirements
 
@@ -22,11 +28,16 @@ docker pull ghcr.io/mutablelogic/kaiak:latest
 docker run -p 8084:8084 ghcr.io/mutablelogic/kaiak:latest
 ```
 
+The base image includes a set of built-in resource types (HTTP server, static
+file serving, logging, etc.), but the platform is designed to be extended with
+your own custom resource types. Once you register a new resource type with the
+server, it becomes automatically available through this Terraform provider.
+
 Multi-arch images (amd64, arm64) are available. For more information on
-configuring the server, see the
+configuring the server and creating custom resources, see the
 [Kaiak documentation](https://github.com/mutablelogic/go-server).
 
-## Installation
+## Deployment
 
 ### From the Terraform Registry
 
@@ -143,16 +154,11 @@ Resources can be imported using their fully qualified name:
 terraform import kaiak_httpserver.main httpserver.main
 ```
 
-## Development
-
-```sh
-# Build
-go build -o terraform-provider-kaiak
-
-# Run tests
-go test ./...
-```
-
 ## License
 
-See [LICENSE](LICENSE) for details.
+Copyright © 2026 David Thorpe. All rights reserved.
+
+Licensed under the [Apache License, Version 2.0](LICENSE). You may use, distribute,
+and modify this software under the terms of the license. The software is provided
+"as is", without warranty of any kind. See the [LICENSE](LICENSE) file for the full
+license text.

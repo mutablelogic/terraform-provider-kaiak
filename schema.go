@@ -103,11 +103,24 @@ func buildResourceSchema(resourceName string, kaiakAttrs []schema.Attribute) (tf
 		}
 	}
 
-	// Convert grouped block members to SingleNestedAttribute
+	// Convert grouped block members to SingleNestedAttribute.
+	// Mark the block Required when any nested attribute is required.
 	for blockName, blockAttrs := range blocks {
+		required := false
+		for _, a := range blockAttrs {
+			if sa, ok := a.(tfschema.StringAttribute); ok && sa.Required {
+				required = true
+			} else if ba, ok := a.(tfschema.BoolAttribute); ok && ba.Required {
+				required = true
+			} else if ia, ok := a.(tfschema.Int64Attribute); ok && ia.Required {
+				required = true
+			}
+		}
 		tfAttrs[blockName] = tfschema.SingleNestedAttribute{
 			Attributes: blockAttrs,
-			Optional:   true,
+			Required:   required,
+			Optional:   !required,
+			Computed:   !required, // server may populate defaults for optional blocks
 		}
 	}
 
@@ -153,11 +166,11 @@ func kaiakValueToTF(ctx context.Context, v any, t string) attr.Value {
 
 	// Value does not match its declared type — fall back to string but
 	// log the mismatch so server-side data issues are not silently hidden.
+	// The raw value is intentionally omitted to avoid leaking sensitive data.
 	if t != "string" {
 		tflog.Warn(ctx, "Kaiak attribute type mismatch: coercing to string", map[string]interface{}{
 			"declared_type": t,
 			"actual_type":   fmt.Sprintf("%T", v),
-			"value":         fmt.Sprintf("%v", v),
 		})
 	}
 	return types.StringValue(fmt.Sprintf("%v", v))
