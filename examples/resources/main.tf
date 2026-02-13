@@ -2,7 +2,7 @@ terraform {
   required_providers {
     kaiak = {
       source  = "mutablelogic/kaiak"
-      version = ">= 1.6.6"
+      version = ">= 1.6.8"
     }
   }
 }
