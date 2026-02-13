@@ -86,10 +86,13 @@ provider "kaiak" {
 |------------|-------------|---------|---------------------|
 | `endpoint` | Base URL of the Kaiak server API | `http://localhost:8084/api` | `KAIAK_ENDPOINT` |
 | `api_key`  | Bearer token for authentication | _(none)_ | `KAIAK_API_KEY` |
-| | HTTP request/response tracing | _(disabled)_ | `KAIAK_TRACE` (set for headers, `verbose` for headers + bodies) |
 
 Both attributes can be set via environment variables instead of (or in addition to)
 the provider block. Config values take precedence over environment variables.
+
+HTTP request/response tracing can be enabled by setting the `KAIAK_TRACE`
+environment variable (any value for headers, `verbose` for headers + bodies).
+See [Debugging & Tracing](#debugging--tracing) below.
 
 ### Resources
 

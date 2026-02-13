@@ -141,6 +141,12 @@ func (d *resourcesDataSource) Configure(_ context.Context, req datasource.Config
 }
 
 func (d *resourcesDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	if d.client == nil {
+		resp.Diagnostics.AddError("Data source not configured",
+			"The provider has not been configured. Ensure the provider block is present and valid.")
+		return
+	}
+
 	var config resourcesDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {

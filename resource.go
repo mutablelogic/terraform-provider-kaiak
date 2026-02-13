@@ -77,10 +77,25 @@ func (r *dynamicResource) Configure(_ context.Context, req resource.ConfigureReq
 	r.client = client
 }
 
+// requireClient returns true if the client is available, or adds a diagnostic
+// error and returns false. Call at the top of each CRUD method.
+func (r *dynamicResource) requireClient(diags *diag.Diagnostics) bool {
+	if r.client != nil {
+		return true
+	}
+	diags.AddError("Resource not configured",
+		"The provider has not been configured. Ensure the provider block is present and valid.")
+	return false
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // CRUD
 
 func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if !r.requireClient(&resp.Diagnostics) {
+		return
+	}
+
 	// Read the instance label
 	var name types.String
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("name"), &name)...)
@@ -133,6 +148,10 @@ func (r *dynamicResource) Create(ctx context.Context, req resource.CreateRequest
 }
 
 func (r *dynamicResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if !r.requireClient(&resp.Diagnostics) {
+		return
+	}
+
 	var id types.String
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("id"), &id)...)
 	if resp.Diagnostics.HasError() {
@@ -149,6 +168,10 @@ func (r *dynamicResource) Read(ctx context.Context, req resource.ReadRequest, re
 }
 
 func (r *dynamicResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if !r.requireClient(&resp.Diagnostics) {
+		return
+	}
+
 	var id types.String
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("id"), &id)...)
 	if resp.Diagnostics.HasError() {
@@ -182,6 +205,10 @@ func (r *dynamicResource) Update(ctx context.Context, req resource.UpdateRequest
 }
 
 func (r *dynamicResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	if !r.requireClient(&resp.Diagnostics) {
+		return
+	}
+
 	var id types.String
 	resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root("id"), &id)...)
 	if resp.Diagnostics.HasError() {
